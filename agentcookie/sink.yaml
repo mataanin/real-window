@@ -1,0 +1,16 @@
+# ~/.config/agentcookie/sink.yaml for this box (push mode: the Mac source pushes to us over Tailscale).
+# Replace 100.x.y.z with this box's `tailscale ip -4`, and your-mac.tailnet with the Mac's MagicDNS name.
+listen:
+  addr: 100.x.y.z:9999
+
+peer:
+  hostname: your-mac.tailnet
+
+# Inject live into the already-running Chrome started by /workspace/property-lookup/start_browser.sh.
+# Do NOT set cdp.enabled / cdp.managed (those launch a second Chrome).
+live_cdp:
+  enabled: true
+  endpoint: http://127.0.0.1:9223
+
+# Linux: no Keychain, never write Chrome's SQLite; CDP injection only.
+skip_chrome_sqlite: true

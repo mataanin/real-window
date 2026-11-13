@@ -1,0 +1,57 @@
+# agentcookie cookie policy for the property_lookup sink on this box.
+# Install as ~/.config/agentcookie/blocklist.yaml (the file name stays "blocklist.yaml";
+# `policy: allowlist` flips it to opt-in). Format per agentcookie internal/config/allowlist.go:
+#   version: 1 (required), policy: allowlist|blocklist, domains: [{pattern, description}]
+# Patterns are SQLite LIKE against Chrome's host_key ('%' wildcard, case-insensitive, host_key has a
+# leading dot for domain cookies), so list both the bare host and "%.host".
+# Only these hosts sync; everything else on the Mac (bank, mail, Google, ...) is refused by this sink.
+version: 1
+policy: allowlist
+domains:
+  # CoStar group (LoopNet, Showcase, Homes.com, Ten-X auctions inside LoopNet)
+  - pattern: "loopnet.com"
+    description: LoopNet
+  - pattern: "%.loopnet.com"
+    description: LoopNet
+  - pattern: "showcase.com"
+    description: Showcase (LoopNet's free sibling)
+  - pattern: "%.showcase.com"
+    description: Showcase
+  - pattern: "homes.com"
+    description: Homes.com
+  - pattern: "%.homes.com"
+    description: Homes.com
+  - pattern: "ten-x.com"
+    description: Ten-X auctions (optional; LoopNet surfaces them)
+  - pattern: "%.ten-x.com"
+    description: Ten-X auctions
+  # Independent commercial marketplaces
+  - pattern: "crexi.com"
+    description: Crexi (incl. api.crexi.com)
+  - pattern: "%.crexi.com"
+    description: Crexi
+  - pattern: "commercialcafe.com"
+    description: CommercialCafe (Yardi)
+  - pattern: "%.commercialcafe.com"
+    description: CommercialCafe
+  - pattern: "commercialedge.com"
+    description: CommercialEdge (Yardi)
+  - pattern: "%.commercialedge.com"
+    description: CommercialEdge
+  - pattern: "brevitas.com"
+    description: Brevitas (private listings need login)
+  - pattern: "%.brevitas.com"
+    description: Brevitas
+  # MLS-fed residential portals
+  - pattern: "zillow.com"
+    description: Zillow (PerimeterX cookies _px3/_pxvid live here)
+  - pattern: "%.zillow.com"
+    description: Zillow
+  - pattern: "realtor.com"
+    description: Realtor.com
+  - pattern: "%.realtor.com"
+    description: Realtor.com
+  - pattern: "redfin.com"
+    description: Redfin
+  - pattern: "%.redfin.com"
+    description: Redfin

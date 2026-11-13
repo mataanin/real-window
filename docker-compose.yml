@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  property-lookup:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - API_TOKEN=${API_TOKEN:-}
+      - CDP_PORT=9223
+      - CACHE_TTL_HOURS=${CACHE_TTL_HOURS:-24}
+      - PROXY=${PROXY:-}
+    volumes:
+      - ./output:/app/output
+      - ./property_lookup.db:/app/property_lookup.db
+      - chrome-profile:/app/.property-lookup/chrome-profile
+    restart: unless-stopped
+    shm_size: '2gb'
+
+volumes:
+  chrome-profile:
