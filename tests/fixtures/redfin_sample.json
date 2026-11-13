@@ -1,0 +1,26 @@
+{
+  "payload": {
+    "listingId": 123456,
+    "address": "48 Amsterdam Ave, Bridgeport, CT 06606",
+    "price": {
+      "value": 550000
+    },
+    "beds": 6,
+    "baths": 3.0,
+    "sqFt": {
+      "value": 3200
+    },
+    "lotSize": {
+      "value": 5000
+    },
+    "yearBuilt": {
+      "value": 1920
+    },
+    "propertyType": "Multi-Family (2-4 Unit)",
+    "listingRemarks": "Great multifamily investment property in Bridgeport.",
+    "photos": [
+      {"url": "https://example.com/photo1.jpg"},
+      {"url": "https://example.com/photo2.jpg"}
+    ]
+  }
+}

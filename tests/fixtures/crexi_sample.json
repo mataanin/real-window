@@ -1,0 +1,16 @@
+{
+  "id": 789,
+  "addressLine1": "48 Amsterdam Ave",
+  "city": "Bridgeport",
+  "state": "CT",
+  "zip": "06606",
+  "listPrice": 575000,
+  "propertyType": "Multifamily",
+  "numberOfUnits": 6,
+  "buildingArea": 3200,
+  "lotSize": 5000,
+  "yearBuilt": 1920,
+  "capRate": 7.5,
+  "noi": 43125,
+  "description": "Six unit multifamily building."
+}

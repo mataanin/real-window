@@ -75,7 +75,7 @@ class Database:
                 address,
                 ",".join(sites) if sites else None,
                 status,
-                dt.datetime.utcnow().isoformat()
+                dt.datetime.now(dt.UTC).isoformat()
             )
         )
         await self.conn.commit()
@@ -151,7 +151,7 @@ class Database:
                 result,
                 report_md,
                 progress,
-                dt.datetime.utcnow().isoformat()
+                dt.datetime.now(dt.UTC).isoformat()
             )
         )
         await self.conn.commit()

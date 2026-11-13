@@ -2,7 +2,7 @@
 import pytest
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 from property_lookup.api.app import create_app
 from property_lookup.api.models import LookupStatus, SiteStatus
 from property_lookup.models import SiteResult, FOUND, NOT_FOUND
@@ -11,33 +11,28 @@ from property_lookup.models import SiteResult, FOUND, NOT_FOUND
 @pytest.fixture
 async def client():
     """Create test client."""
+    from asgi_lifespan import LifespanManager
+    
     os.environ.pop("API_TOKEN", None)
     app = create_app()
     
-    await app.state.db.init()
-    await app.state.queue.start()
-    
-    async with AsyncClient(app=app, base_url="http://test") as ac:
-        yield ac
-    
-    await app.state.queue.stop()
-    await app.state.db.close()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            yield ac
 
 
 @pytest.fixture
 async def auth_client():
     """Create test client with authentication."""
+    from asgi_lifespan import LifespanManager
+    
     os.environ["API_TOKEN"] = "test-token-12345"
     app = create_app()
     
-    await app.state.db.init()
-    await app.state.queue.start()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            yield ac
     
-    async with AsyncClient(app=app, base_url="http://test") as ac:
-        yield ac
-    
-    await app.state.queue.stop()
-    await app.state.db.close()
     os.environ.pop("API_TOKEN", None)
 
 

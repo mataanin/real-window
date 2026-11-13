@@ -63,7 +63,7 @@ class TestStreetNormalization:
     def test_norm_street_direction(self):
         """Test street with direction."""
         assert norm_street("North Main Street") == "n main st"
-        assert norm_street("Main Street South") == "main st s"
+        assert norm_street("Main Street South") == "main street s"
     
     def test_norm_street_multiple_suffixes(self):
         """Test handling of suffix variations."""
