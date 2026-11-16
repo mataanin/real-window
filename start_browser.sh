@@ -60,6 +60,12 @@ if [[ -n "${PROXY:-}" ]]; then
   PROXY_ARGS=(--proxy-server="${PROXY}")
 fi
 
+# Add --no-sandbox if running as root (required in Docker)
+SANDBOX_ARGS=()
+if [[ $EUID -eq 0 ]]; then
+  SANDBOX_ARGS=(--no-sandbox)
+fi
+
 nohup "$CHROME_BIN" \
   --remote-debugging-port="${CDP_PORT}" \
   --remote-debugging-address=127.0.0.1 \
@@ -70,6 +76,7 @@ nohup "$CHROME_BIN" \
   --lang=en-US \
   --window-size=1440,960 \
   "${PROXY_ARGS[@]}" \
+  "${SANDBOX_ARGS[@]}" \
   "${HEADLESS_ARGS[@]}" \
   about:blank >"$LOG" 2>&1 &
 echo $! > "$STATE_DIR/chrome.pid"

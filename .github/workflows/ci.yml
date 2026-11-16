@@ -48,9 +48,21 @@ jobs:
     - name: Test Docker image
       run: |
         docker run -d --name test-container -p 8000:8000 property-lookup:test
-        sleep 30
-        curl -f http://localhost:8000/health || (docker logs test-container && exit 1)
+        echo "Waiting for application to start (Chrome + API)..."
+        for i in {1..60}; do
+          sleep 2
+          if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+            echo "Health check passed!"
+            curl http://localhost:8000/health
+            docker stop test-container
+            exit 0
+          fi
+          echo "Attempt $i/60..."
+        done
+        echo "Health check failed after 120s"
+        docker logs test-container
         docker stop test-container
+        exit 1
   
   terraform:
     runs-on: ubuntu-latest
