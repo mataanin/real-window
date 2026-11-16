@@ -35,8 +35,9 @@ COPY . .
 RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel \
     && pip3 install --no-cache-dir .
 
-# Install Playwright browsers (Chromium for fallback, Chrome is already installed)
-RUN playwright install chromium
+# Note: Playwright is installed but we don't install its browsers
+# We use the Chrome deb package installed above via start_browser.sh
+# This avoids needing playwright install-deps and keeps the image smaller
 
 # Create necessary directories
 RUN mkdir -p /app/output /app/cookies /app/.property-lookup /app/logs
