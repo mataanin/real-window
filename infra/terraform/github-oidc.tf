@@ -47,7 +47,10 @@ resource "aws_iam_role" "github_deploy" {
             "${local.oidc_provider_url}:aud" = "sts.amazonaws.com"
           }
           StringLike = {
-            "${local.oidc_provider_url}:sub" = "repo:${var.github_repo}:ref:refs/heads/${var.github_deploy_branch}"
+            "${local.oidc_provider_url}:sub" = compact([
+              "repo:${var.github_repo}:ref:refs/heads/${var.github_deploy_branch}",
+              var.github_oidc_subject_prefix == "" ? "" : "${var.github_oidc_subject_prefix}:ref:refs/heads/${var.github_deploy_branch}",
+            ])
           }
         }
       }

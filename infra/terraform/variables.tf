@@ -147,6 +147,12 @@ variable "github_repo" {
   default     = "mataanin/real-window"
 }
 
+variable "github_oidc_subject_prefix" {
+  description = "Subject prefix GitHub uses when the repo has immutable OIDC subject claims enabled (gh api repos/OWNER/REPO/actions/oidc/customization/sub -> sub_claim_prefix). Empty to trust only repo:OWNER/REPO."
+  type        = string
+  default     = "repo:mataanin@362205/real-window@1457026366"
+}
+
 variable "github_deploy_branch" {
   description = "GitHub branch allowed to deploy"
   type        = string
