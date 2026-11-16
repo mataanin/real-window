@@ -68,6 +68,19 @@ jobs:
         echo "Restarting container..."
         docker restart test-container
         wait_healthy
+        echo "Driving a page through Playwright over CDP..."
+        docker exec test-container python -c '
+        import asyncio
+        from property_lookup.browser import BrowserSession, body_text
+        async def main():
+            async with BrowserSession(mode="cdp", auto_start=False) as s:
+                page = await s.new_page()
+                await page.goto("data:text/html,<h1>playwright-ok</h1>")
+                text = await body_text(page)
+                assert "playwright-ok" in text, text
+                print("Playwright OK:", text.strip())
+        asyncio.run(main())
+        '
         docker stop test-container
 
   terraform:

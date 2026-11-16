@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y \
     gnupg \
     xvfb \
     x11-utils \
+    libatomic1 \
     curl \
     git \
     ca-certificates \
