@@ -47,23 +47,29 @@ jobs:
     
     - name: Test Docker image
       run: |
-        docker run -d --name test-container -p 8000:8000 property-lookup:test
-        echo "Waiting for application to start (Chrome + API)..."
-        for i in {1..60}; do
-          sleep 2
-          if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
-            echo "Health check passed!"
-            curl http://localhost:8000/health
-            docker stop test-container
-            exit 0
-          fi
-          echo "Attempt $i/60..."
-        done
-        echo "Health check failed after 120s"
-        docker logs test-container
+        wait_healthy() {
+          for i in {1..60}; do
+            sleep 2
+            if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+              curl -s http://localhost:8000/health; echo
+              if curl -s http://localhost:8000/health | grep -q '"cdp_connection":"reachable"'; then
+                return 0
+              fi
+            fi
+            echo "Attempt $i/60..."
+          done
+          docker logs test-container
+          return 1
+        }
+        docker run -d --init --name test-container -p 8000:8000 --shm-size=2g property-lookup:test
+        echo "Waiting for application to start (Xvfb + Chrome + API)..."
+        wait_healthy
+        # A restarted container keeps /tmp; make sure stale X locks don't break Chrome.
+        echo "Restarting container..."
+        docker restart test-container
+        wait_healthy
         docker stop test-container
-        exit 1
-  
+
   terraform:
     runs-on: ubuntu-latest
     

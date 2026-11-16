@@ -56,7 +56,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan
     )
     
-    app.state.db = Database()
+    app.state.db = Database(os.getenv("DB_PATH", "property_lookup.db"))
     app.state.queue = JobQueue(app.state.db)
     
     @app.get("/health")

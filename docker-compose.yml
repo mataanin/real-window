@@ -1,8 +1,7 @@
-version: '3.8'
-
 services:
   property-lookup:
     build: .
+    init: true
     ports:
       - "8000:8000"
     environment:
@@ -10,9 +9,10 @@ services:
       - CDP_PORT=9223
       - CACHE_TTL_HOURS=${CACHE_TTL_HOURS:-24}
       - PROXY=${PROXY:-}
+      - DB_PATH=/app/data/property_lookup.db
     volumes:
       - ./output:/app/output
-      - ./property_lookup.db:/app/property_lookup.db
+      - ./data:/app/data
       - chrome-profile:/app/.property-lookup/chrome-profile
     restart: unless-stopped
     shm_size: '2gb'

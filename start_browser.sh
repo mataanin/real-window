@@ -44,10 +44,21 @@ if [[ "${PL_HEADLESS:-0}" == "1" ]]; then
 else
   # Dedicated Xvfb display (headed Chrome looks far more like a real browser
   # to bot protection than headless).
-  if ! xdpyinfo -display "$PL_DISPLAY" >/dev/null 2>&1 && ! [[ -e "/tmp/.X11-unix/X${PL_DISPLAY#:}" ]]; then
+  # A leftover /tmp/.X11-unix socket does not mean a server is listening, so
+  # probe the display itself.
+  if ! xdpyinfo -display "$PL_DISPLAY" >/dev/null 2>&1; then
+    rm -f "/tmp/.X${PL_DISPLAY#:}-lock" "/tmp/.X11-unix/X${PL_DISPLAY#:}"
     nohup Xvfb "$PL_DISPLAY" -screen 0 1920x1200x24 -ac -nolisten tcp >"$STATE_DIR/xvfb.log" 2>&1 &
     echo $! > "$STATE_DIR/xvfb.pid"
-    sleep 1
+    for i in $(seq 1 30); do
+      xdpyinfo -display "$PL_DISPLAY" >/dev/null 2>&1 && break
+      if [[ $i -eq 30 ]]; then
+        echo "Xvfb did not start on ${PL_DISPLAY}; see $STATE_DIR/xvfb.log" >&2
+        tail -20 "$STATE_DIR/xvfb.log" >&2 || true
+        exit 1
+      fi
+      sleep 0.5
+    done
   fi
   export DISPLAY="$PL_DISPLAY"
 fi

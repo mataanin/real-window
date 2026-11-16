@@ -30,6 +30,13 @@ if [ ! -f .env ]; then
   echo "WARNING: .env file not found after reset"
 fi
 
+# Older compose files bind-mounted ./property_lookup.db, which Docker created
+# as an empty directory when the file was missing.
+if [ -d property_lookup.db ]; then
+  rmdir property_lookup.db 2>/dev/null || echo "WARNING: ./property_lookup.db is a non-empty directory"
+fi
+mkdir -p data output
+
 # Stop containers
 echo "==> Stopping containers..."
 docker compose down

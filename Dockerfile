@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
     xvfb \
+    x11-utils \
     curl \
     git \
     ca-certificates \

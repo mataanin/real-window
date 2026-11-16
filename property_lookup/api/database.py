@@ -18,6 +18,9 @@ class Database:
     
     async def init(self):
         """Initialize database connection and create tables."""
+        parent = os.path.dirname(self.db_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         self.conn = await aiosqlite.connect(self.db_path)
         self.conn.row_factory = aiosqlite.Row
         

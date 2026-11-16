@@ -113,9 +113,9 @@ ENVEOF
 chown ubuntu:ubuntu .env
 chmod 600 .env
 
-# Create output directory
-mkdir -p output
-chown ubuntu:ubuntu output
+# Create persistent data directories
+mkdir -p output data
+chown ubuntu:ubuntu output data
 
 # Build and start the application
 echo "==> Building Docker image"
