@@ -24,13 +24,13 @@ systemctl status snap.amazon-ssm-agent.amazon-ssm-agent.service --no-pager
 
 # Install Docker
 echo "==> Installing Docker"
-apt-get install -y -qq ca-certificates curl gnupg
+apt-get install -y -qq ca-certificates curl
 install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-chmod a+r /etc/apt/keyrings/docker.gpg
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
 
 echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
   $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
   tee /etc/apt/sources.list.d/docker.list > /dev/null
 
@@ -117,16 +117,25 @@ chmod 600 .env
 mkdir -p output
 chown ubuntu:ubuntu output
 
-# Start the application
+# Build and start the application
+echo "==> Building Docker image"
+sudo -u ubuntu docker compose build
+
 echo "==> Starting application with Docker Compose"
 sudo -u ubuntu docker compose up -d
 
 # Wait for service to be ready
-echo "==> Waiting for service to start"
-for i in $(seq 1 60); do
+echo "==> Waiting for service to start (this may take a minute for first-time Chrome setup)"
+for i in $(seq 1 120); do
   if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
     echo "==> Service is ready!"
+    curl -s http://localhost:8000/health | head -20
     break
+  fi
+  if [ $i -eq 120 ]; then
+    echo "==> ERROR: Service failed to start after 120 seconds"
+    echo "==> Docker logs:"
+    sudo -u ubuntu docker compose logs --tail=50
   fi
   sleep 2
 done

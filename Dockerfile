@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM python:3.12-slim-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -8,18 +8,19 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    python3.11 \
-    python3-pip \
     wget \
     gnupg \
     xvfb \
-    x11vnc \
     curl \
+    git \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Chrome
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
+# Install Google Chrome with proper keyring (no deprecated apt-key)
+RUN wget -q -O /tmp/google-chrome-key.gpg https://dl-ssl.google.com/linux/linux_signing_key.pub \
+    && gpg --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg /tmp/google-chrome-key.gpg \
+    && rm /tmp/google-chrome-key.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
     && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
@@ -27,15 +28,15 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key
 # Set up app directory
 WORKDIR /app
 
-# Copy requirements and install Python dependencies
-COPY pyproject.toml requirements.txt* ./
-RUN pip3 install --no-cache-dir -e .
-
-# Install Playwright and Chrome browser
-RUN pip3 install playwright && playwright install chromium && playwright install-deps
-
-# Copy application code
+# Copy source code first
 COPY . .
+
+# Install Python dependencies (non-editable)
+RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel \
+    && pip3 install --no-cache-dir .
+
+# Install Playwright browsers (Chromium for fallback, Chrome is already installed)
+RUN playwright install chromium
 
 # Create necessary directories
 RUN mkdir -p /app/output /app/cookies /app/.property-lookup /app/logs
@@ -44,7 +45,6 @@ RUN mkdir -p /app/output /app/cookies /app/.property-lookup /app/logs
 EXPOSE 8000
 
 # Start script
-COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
 
-ENTRYPOINT ["/docker-entrypoint.sh"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

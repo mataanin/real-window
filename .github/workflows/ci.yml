@@ -35,6 +35,23 @@ jobs:
         files: ./coverage.xml
         fail_ci_if_error: false
   
+  docker:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Build Docker image
+      run: |
+        docker build -t property-lookup:test .
+    
+    - name: Test Docker image
+      run: |
+        docker run -d --name test-container -p 8000:8000 property-lookup:test
+        sleep 30
+        curl -f http://localhost:8000/health || (docker logs test-container && exit 1)
+        docker stop test-container
+  
   terraform:
     runs-on: ubuntu-latest
     
