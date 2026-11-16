@@ -2,8 +2,9 @@ services:
   property-lookup:
     build: .
     init: true
-    ports:
-      - "8000:8000"
+    # Host networking puts Chrome's loopback-only CDP port (127.0.0.1:9223) on the
+    # host, where the agentcookie sink injects cookies. The API listens on host :8000.
+    network_mode: host
     environment:
       - API_TOKEN=${API_TOKEN:-}
       - CDP_PORT=9223

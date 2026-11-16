@@ -278,8 +278,12 @@ Agentcookie syncs cookies from your Mac's Chrome to the Docker container's Chrom
 
 ### On the EC2 Instance
 
-1. **Get the container's Chrome CDP port mapping**:
-   The Docker container exposes Chrome CDP on `127.0.0.1:9223` inside the container. You need to map this for agentcookie.
+1. **Check the prerequisites**:
+   - The container uses `network_mode: host`, so Chrome's CDP endpoint is on the host at
+     `127.0.0.1:9223`. `curl -s http://127.0.0.1:9223/json/version` on the instance should return JSON.
+   - Tailscale must be up on the instance (`tailscale status`). It is only installed by cloud-init when
+     `tailscale_auth_key` is set; otherwise run
+     `curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up` and sign in to the Mac's tailnet.
 
 2. **Install agentcookie binary**:
 ```bash
@@ -309,22 +313,6 @@ live_cdp:
   endpoint: http://127.0.0.1:9223
 skip_chrome_sqlite: true
 EOF
-```
-
-4. **Expose Docker CDP to host** (if not already):
-   
-   Update `docker-compose.yml` to expose CDP:
-```yaml
-services:
-  property-lookup:
-    ports:
-      - "8000:8000"
-      - "127.0.0.1:9223:9223"  # Add this line
-```
-
-Restart:
-```bash
-docker-compose down && docker-compose up -d
 ```
 
 ### On Your Mac
