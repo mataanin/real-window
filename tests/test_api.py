@@ -116,98 +116,69 @@ class TestAuthentication:
         response = client.get("/sites")
         assert response.status_code == 200
     
-    @pytest.mark.skip("Environment variable timing issue in TestClient")
-    def test_auth_required_when_token_set(self):
-        """Test authentication required when API_TOKEN is set."""
-        # Note: This test is skipped because create_app() reads API_TOKEN at module level
-        # The test_valid_token_accepted test verifies the auth mechanism works
-        pass
-    
-    def test_valid_token_accepted(self):
+    def test_auth_required_when_token_set(self, auth_client):
+        """Requests without a bearer token are rejected when API_TOKEN is set."""
+        assert auth_client.get("/sites").status_code == 401
+
+    def test_valid_token_accepted(self, auth_client):
         """Test valid bearer token is accepted."""
-        os.environ["API_TOKEN"] = "test-token-12345"
-        
-        with patch("property_lookup.api.app.Database") as mock_db_class, \
-             patch("property_lookup.api.app.JobQueue") as mock_queue_class:
-            
-            mock_db = AsyncMock()
-            mock_db.init = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_db_class.return_value = mock_db
-            
-            mock_queue = AsyncMock()
-            mock_queue.start = AsyncMock()
-            mock_queue.stop = AsyncMock()
-            mock_queue_class.return_value = mock_queue
-            
-            app = create_app()
-            
-            with TestClient(app, raise_server_exceptions=False) as client:
-                response = client.get(
-                    "/sites",
-                    headers={"Authorization": "Bearer test-token-12345"}
-                )
-                assert response.status_code == 200
-        
-        os.environ.pop("API_TOKEN", None)
-    
-    @pytest.mark.skip("Environment variable timing issue in TestClient")
-    def test_invalid_token_rejected(self):
+        r = auth_client.get("/sites", headers={"Authorization": "Bearer test-token-12345"})
+        assert r.status_code == 200
+
+    def test_invalid_token_rejected(self, auth_client):
         """Test invalid bearer token is rejected."""
-        # Note: This test is skipped because create_app() reads API_TOKEN at module level
-        # The test_valid_token_accepted test verifies the auth mechanism works
-        pass
+        r = auth_client.get("/sites", headers={"Authorization": "Bearer wrong"})
+        assert r.status_code == 401
+
+    def test_health_needs_no_token(self, auth_client):
+        with patch("property_lookup.api.app.check_cdp_connection", return_value=True):
+            assert auth_client.get("/health").status_code == 200
+
+    def test_body_endpoint_with_token(self, auth_client):
+        r = auth_client.post("/lookups", json={"address": "48 Amsterdam Ave, Bridgeport, CT 06606"},
+                             headers={"Authorization": "Bearer test-token-12345"})
+        assert r.status_code == 202
+
+
+def _job(status, report_md=None):
+    from property_lookup.api.models import LookupResponse
+    return LookupResponse(job_id="test-job-id", status=status, address="123 Main St", report_md=report_md)
 
 
 class TestLookupEndpoints:
     """Test lookup creation and retrieval (mocked)."""
-    
-    @pytest.mark.skip("TestClient issue with Pydantic body parameters")
+
     def test_create_lookup(self, client):
         """Test creating a lookup job."""
-        response = client.post(
-            "/lookups",
-            json={"address": "48 Amsterdam Ave, Bridgeport, CT 06606"},
-            headers={"Content-Type": "application/json"}
-        )
+        response = client.post("/lookups", json={"address": "48 Amsterdam Ave, Bridgeport, CT 06606"})
         assert response.status_code == 202, f"Failed: {response.text}"
-        data = response.json()
-        assert "job_id" in data
-        assert data["status"] == "queued"
-    
-    @pytest.mark.skip("TestClient issue with Pydantic body parameters")
+        assert response.json() == {"job_id": "test-job-id", "status": "queued"}
+        client.app.state.mock_queue.submit_job.assert_awaited_once_with(
+            address="48 Amsterdam Ave, Bridgeport, CT 06606", sites=None, force_refresh=False)
+
     def test_create_lookup_with_sites(self, client):
         """Test creating a lookup with specific sites."""
-        response = client.post(
-            "/lookups",
-            json={
-                "address": "48 Amsterdam Ave, Bridgeport, CT 06606",
-                "sites": ["zillow", "redfin"]
-            }
-        )
+        response = client.post("/lookups", json={
+            "address": "48 Amsterdam Ave, Bridgeport, CT 06606",
+            "sites": ["zillow", "redfin"],
+            "force_refresh": True,
+        })
         assert response.status_code == 202
-        data = response.json()
-        assert "job_id" in data
-    
-    @pytest.mark.skip("TestClient issue with Pydantic body parameters")
+        client.app.state.mock_queue.submit_job.assert_awaited_once_with(
+            address="48 Amsterdam Ave, Bridgeport, CT 06606", sites=["zillow", "redfin"], force_refresh=True)
+
+    def test_create_lookup_requires_address(self, client):
+        assert client.post("/lookups", json={}).status_code == 422
+
     def test_get_lookup_status(self, client):
         """Test retrieving lookup status."""
-        # First create a lookup
-        create_response = client.post(
-            "/lookups",
-            json={"address": "123 Main St, Bridgeport, CT"}
-        )
-        assert create_response.status_code == 202, f"Create failed: {create_response.text}"
-        job_id = create_response.json()["job_id"]
-        
-        # Now retrieve it
-        response = client.get(f"/lookups/{job_id}")
+        client.app.state.mock_queue.get_job_status = AsyncMock(return_value=_job(LookupStatus.RUNNING))
+        response = client.get("/lookups/test-job-id")
         assert response.status_code == 200
         data = response.json()
-        assert data["job_id"] == job_id
-        assert "status" in data
-        assert data["status"] in ["queued", "running", "done", "failed"]
-    
+        assert data["job_id"] == "test-job-id"
+        assert data["status"] == "running"
+
     def test_get_nonexistent_lookup(self, client):
         """Test retrieving non-existent lookup."""
         response = client.get("/lookups/nonexistent-id")
@@ -216,48 +187,42 @@ class TestLookupEndpoints:
 
 class TestSyncLookupEndpoint:
     """Test synchronous lookup endpoint."""
-    
-    @pytest.mark.skip("TestClient issue with async queue operations")
+
     def test_sync_lookup_no_wait(self, client):
         """Test sync lookup without waiting."""
-        response = client.get(
-            "/lookup",
-            params={"address": "123 Main St, Bridgeport, CT", "wait": "false"}
-        )
+        response = client.get("/lookup", params={"address": "123 Main St, Bridgeport, CT", "wait": "false"})
         assert response.status_code == 200
-        data = response.json()
-        assert "job_id" in data
-        assert data["status"] == "queued"
-    
-    @pytest.mark.skip("TestClient issue with async queue operations")
+        assert response.json() == {"job_id": "test-job-id", "status": "queued"}
+
     def test_sync_lookup_with_sites(self, client):
         """Test sync lookup with specific sites."""
-        response = client.get(
-            "/lookup",
-            params={
-                "address": "123 Main St, Bridgeport, CT",
-                "sites": "zillow,redfin",
-                "wait": "false"
-            }
-        )
+        response = client.get("/lookup", params={
+            "address": "123 Main St, Bridgeport, CT", "sites": "zillow, redfin", "wait": "false"})
         assert response.status_code == 200
+        kwargs = client.app.state.mock_queue.submit_job.call_args.kwargs
+        assert kwargs["sites"] == ["zillow", "redfin"]
+
+    def test_sync_lookup_wait_returns_result(self, client):
+        client.app.state.mock_queue.get_job_status = AsyncMock(return_value=_job(LookupStatus.DONE, "# R"))
+        response = client.get("/lookup", params={"address": "123 Main St, Bridgeport, CT", "wait": "true"})
+        assert response.status_code == 200
+        assert response.json()["status"] == "done"
 
 
 class TestReportEndpoint:
     """Test markdown report endpoint."""
-    
-    @pytest.mark.skip("TestClient issue with Pydantic body parameters")
+
     def test_get_report_not_done(self, client):
         """Test getting report for incomplete job."""
-        response = client.post(
-            "/lookups",
-            json={"address": "123 Main St, Bridgeport, CT"}
-        )
-        assert response.status_code == 202, f"Create failed: {response.text}"
-        job_id = response.json()["job_id"]
-        
-        response = client.get(f"/lookups/{job_id}/report.md")
+        client.app.state.mock_queue.get_job_status = AsyncMock(return_value=_job(LookupStatus.QUEUED))
+        response = client.get("/lookups/test-job-id/report.md")
         assert response.status_code == 400
+
+    def test_get_report_done(self, client):
+        client.app.state.mock_queue.get_job_status = AsyncMock(return_value=_job(LookupStatus.DONE, "# Report"))
+        response = client.get("/lookups/test-job-id/report.md")
+        assert response.status_code == 200
+        assert response.text == "# Report"
 
 
 class TestSessionsEndpoint:

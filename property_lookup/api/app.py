@@ -16,20 +16,20 @@ from .queue import JobQueue
 from .database import Database
 from ..browser import check_cdp_connection
 
-API_TOKEN = os.getenv("API_TOKEN")
-security = HTTPBearer(auto_error=False) if API_TOKEN else None
+security = HTTPBearer(auto_error=False)
 
 
-async def verify_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security) if security else None):
+async def verify_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
     """Verify bearer token if API_TOKEN is set."""
-    if not API_TOKEN:
+    api_token = os.getenv("API_TOKEN")
+    if not api_token:
         return None
     if not credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Bearer token required"
         )
-    if credentials.credentials != API_TOKEN:
+    if credentials.credentials != api_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication token"
