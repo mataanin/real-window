@@ -89,3 +89,94 @@ jobs:
       run: |
         cd infra/terraform
         terraform validate
+  
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [test, docker, terraform]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    
+    permissions:
+      id-token: write
+      contents: read
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check if deployment is configured
+      id: check
+      run: |
+        if [ -z "${{ vars.AWS_DEPLOY_ROLE_ARN }}" ]; then
+          echo "configured=false" >> $GITHUB_OUTPUT
+          echo "⚠️  Deployment not configured - skipping"
+          echo "To enable auto-deploy, run: terraform output github_setup_commands"
+        else
+          echo "configured=true" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Configure AWS credentials
+      if: steps.check.outputs.configured == 'true'
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+        aws-region: ${{ vars.AWS_REGION }}
+    
+    - name: Deploy to EC2 via SSM
+      if: steps.check.outputs.configured == 'true'
+      run: |
+        INSTANCE_ID="${{ vars.EC2_INSTANCE_ID }}"
+        
+        echo "Deploying to instance $INSTANCE_ID..."
+        
+        # Send deployment command via SSM
+        COMMAND_ID=$(aws ssm send-command \
+          --instance-ids "$INSTANCE_ID" \
+          --document-name "AWS-RunShellScript" \
+          --parameters 'commands=[
+            "set -e",
+            "cd /home/ubuntu/property-lookup",
+            "sudo -u ubuntu bash scripts/deploy.sh"
+          ]' \
+          --output text \
+          --query 'Command.CommandId')
+        
+        echo "SSM Command ID: $COMMAND_ID"
+        
+        # Wait for command to complete
+        echo "Waiting for deployment to complete..."
+        aws ssm wait command-executed \
+          --command-id "$COMMAND_ID" \
+          --instance-id "$INSTANCE_ID" \
+          --max-attempts 60 \
+          --delay 5 || true
+        
+        # Get command result
+        RESULT=$(aws ssm get-command-invocation \
+          --command-id "$COMMAND_ID" \
+          --instance-id "$INSTANCE_ID" \
+          --output json)
+        
+        STATUS=$(echo "$RESULT" | jq -r '.Status')
+        STDOUT=$(echo "$RESULT" | jq -r '.StandardOutputContent')
+        STDERR=$(echo "$RESULT" | jq -r '.StandardErrorContent')
+        
+        echo "=== Deployment Status: $STATUS ==="
+        echo ""
+        echo "=== STDOUT ==="
+        echo "$STDOUT"
+        echo ""
+        
+        if [ -n "$STDERR" ]; then
+          echo "=== STDERR ==="
+          echo "$STDERR"
+          echo ""
+        fi
+        
+        if [ "$STATUS" != "Success" ]; then
+          echo "❌ Deployment failed with status: $STATUS"
+          exit 1
+        fi
+        
+        echo "✅ Deployment completed successfully"

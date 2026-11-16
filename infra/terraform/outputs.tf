@@ -55,3 +55,22 @@ output "tailscale_enabled" {
   value       = var.tailscale_auth_key != null ? "yes" : "no"
   sensitive   = true
 }
+
+output "github_deploy_role_arn" {
+  description = "IAM role ARN for GitHub Actions deployment"
+  value       = aws_iam_role.github_deploy.arn
+}
+
+output "github_setup_commands" {
+  description = "Commands to set up GitHub repository variables for auto-deploy"
+  value       = <<-EOT
+    # Run these commands from your Mac to enable auto-deployment:
+    
+    gh variable set AWS_DEPLOY_ROLE_ARN --body "${aws_iam_role.github_deploy.arn}" --repo ${var.github_repo}
+    gh variable set AWS_REGION --body "${var.region}" --repo ${var.github_repo}
+    gh variable set EC2_INSTANCE_ID --body "${aws_instance.property_lookup.id}" --repo ${var.github_repo}
+    
+    # Verify:
+    gh variable list --repo ${var.github_repo}
+  EOT
+}

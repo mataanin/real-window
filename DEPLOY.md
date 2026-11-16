@@ -1,6 +1,14 @@
 # Deployment Guide
 
-This guide covers deploying the Property Lookup API to an Ubuntu EC2 instance with Docker, Tailscale integration, and agentcookie sink setup.
+This guide covers deploying the Property Lookup API to an Ubuntu EC2 instance with Docker, Tailscale integration, agentcookie sink setup, and automated deployments from GitHub Actions.
+
+## Table of Contents
+
+- [Quick Start with Docker Compose](#quick-start-with-docker-compose)
+- [EC2 Deployment with Terraform](#advanced-setup-ec2--tailscale--agentcookie)
+- [Auto-Deployment Setup](#auto-deployment-from-github-actions)
+- [Agentcookie Setup](#agentcookie-setup-for-cookie-syncing)
+- [Troubleshooting](#troubleshooting)
 
 ## Overview
 
@@ -9,6 +17,118 @@ The deployment stack consists of:
 - Optional Tailscale for secure remote access
 - Optional agentcookie sink for syncing cookies from your Mac
 - Optional residential proxy for bypassing datacenter IP blocks
+
+## Auto-Deployment from GitHub Actions
+
+After deploying your EC2 instance, you can enable automatic deployments when code is pushed to `main`.
+
+### How It Works
+
+1. Push to `main` branch
+2. CI runs (tests, Docker build, Terraform validation)
+3. If CI passes, deployment job runs
+4. GitHub Actions uses OIDC to authenticate to AWS
+5. Sends SSM command to EC2 instance
+6. Instance runs `scripts/deploy.sh` which:
+   - Fetches latest code (`git reset --hard origin/main`)
+   - Rebuilds Docker image
+   - Restarts containers
+   - Waits for health check
+7. Deployment succeeds or fails with full logs in Actions
+
+### One-Time Setup
+
+**Prerequisites:**
+- Terraform-deployed EC2 instance
+- GitHub CLI (`gh`) installed and authenticated
+- AWS credentials configured
+
+**Step 1: Apply Terraform (if not already done)**
+
+```bash
+cd infra/terraform
+terraform apply
+```
+
+This creates:
+- GitHub OIDC provider in AWS (if `create_oidc_provider=true`)
+- IAM role with SSM permissions scoped to your instance
+- Role trust policy limited to your repo on `main` branch
+
+**Step 2: Set GitHub Repository Variables**
+
+```bash
+# Get the exact commands from Terraform output
+terraform output -raw github_setup_commands
+
+# Or run them directly:
+terraform output -raw github_setup_commands | bash
+```
+
+This sets three repository variables:
+- `AWS_DEPLOY_ROLE_ARN` - IAM role for deployment
+- `AWS_REGION` - AWS region
+- `EC2_INSTANCE_ID` - Instance to deploy to
+
+**Step 3: Verify Setup**
+
+```bash
+# Check variables are set
+gh variable list
+
+# Make a test commit and push to main
+git commit --allow-empty -m "Test auto-deploy"
+git push origin main
+
+# Watch the deployment
+gh run watch
+```
+
+### Security Notes
+
+- OIDC role can only be assumed by your repo on `main` branch
+- IAM permissions limited to:
+  - SSM commands on this specific instance only
+  - Only AWS-RunShellScript document
+  - Read-only EC2 describe for instance info
+- No long-lived AWS credentials stored in GitHub
+- Deployments run with concurrency control (no parallel deploys)
+
+### Manual Deployment
+
+You can also run the deploy script manually via SSM:
+
+```bash
+# From your Mac
+aws ssm start-session --target <instance-id>
+
+# On the instance
+cd /home/ubuntu/property-lookup
+sudo -u ubuntu bash scripts/deploy.sh
+```
+
+### Disabling Auto-Deploy
+
+To temporarily disable without removing the setup:
+
+```bash
+# Delete the role variable
+gh variable delete AWS_DEPLOY_ROLE_ARN
+
+# Deployments will skip gracefully with a notice
+```
+
+### What Gets Deployed
+
+The `git reset --hard origin/main` preserves:
+- `.env` file (gitignored, contains secrets)
+- `output/` directory (gitignored, lookup results)
+- `property_lookup.db` (gitignored, cache database)
+- `cookies/` contents (gitignored, cookie files)
+
+Everything else is reset to match the `main` branch exactly.
+
+---
 
 ## Quick Start with Docker Compose
 

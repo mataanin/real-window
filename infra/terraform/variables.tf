@@ -134,3 +134,21 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "create_oidc_provider" {
+  description = "Create GitHub OIDC provider (set false if one already exists for token.actions.githubusercontent.com)"
+  type        = bool
+  default     = true
+}
+
+variable "github_repo" {
+  description = "GitHub repository in owner/repo format for OIDC trust"
+  type        = string
+  default     = "mataanin/real-window"
+}
+
+variable "github_deploy_branch" {
+  description = "GitHub branch allowed to deploy"
+  type        = string
+  default     = "main"
+}
