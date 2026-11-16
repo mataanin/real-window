@@ -6,6 +6,10 @@ so the default context already carries the user's sessions.
 
 Fallback mode ("launch"): launch our own Chrome (channel=chrome, headed under the current DISPLAY) with a
 separate persistent profile and inject cookie files from cookies/ (see COOKIES.md).
+
+Hosted mode ("browserbase"): create a Browserbase session (Verified browser, residential proxy, CAPTCHA
+solving) on a persistent Context and attach over CDP; the session is released, and the Context saved,
+on exit. See browserbase.py.
 """
 from __future__ import annotations
 import asyncio
@@ -40,9 +44,17 @@ async def human_pause(lo: float = 0.6, hi: float = 1.8) -> None:
     await asyncio.sleep(random.uniform(lo, hi))
 
 
+SOLVER_EVENTS = {
+    "browserbase-solving-started": "started",
+    "browserbase-solving-finished": "finished",
+    "browserbase-solving-errored": "errored",
+}
+
+
 class BrowserSession:
     def __init__(self, mode: str = "cdp", headed: bool = True, cookie_files: bool = False,
-                 cookie_dir: Path | None = None, auto_start: bool = True):
+                 cookie_dir: Path | None = None, auto_start: bool = True,
+                 bb_config=None, bb_purpose: str = "lookup", bb_timeout_s: int | None = None):
         self.mode, self.headed, self.cookie_files = mode, headed, cookie_files
         self.cookie_dir = cookie_dir or (ROOT / "cookies")
         self.auto_start = auto_start
@@ -50,10 +62,52 @@ class BrowserSession:
         self.browser: Browser | None = None
         self.context: BrowserContext | None = None
         self._own_pages: list[Page] = []
+        self.bb_config = bb_config
+        self.bb_purpose = bb_purpose
+        self.bb_timeout_s = bb_timeout_s
+        self.bb_client = None
+        self.bb_session: dict | None = None
+        self._solver: dict[int, str] = {}
+
+    @property
+    def solves_captchas(self) -> bool:
+        return self.mode == "browserbase" and bool(self.bb_config and self.bb_config.solve_captchas)
+
+    @property
+    def session_url(self) -> str | None:
+        if self.bb_session:
+            from .browserbase import SESSION_DASHBOARD
+            return SESSION_DASHBOARD.format(id=self.bb_session["id"])
+        return None
+
+    def _track_solver(self, page: Page) -> None:
+        key = id(page)
+
+        def on_console(msg):
+            state = SOLVER_EVENTS.get(msg.text)
+            if state:
+                self._solver[key] = state
+        page.on("console", on_console)
 
     async def __aenter__(self) -> "BrowserSession":
         self._pw = await async_playwright().start()
-        if self.mode == "cdp":
+        if self.mode == "browserbase":
+            from .browserbase import BrowserbaseClient, BrowserbaseConfig, wait_for_context_settle
+            self.bb_config = self.bb_config or BrowserbaseConfig.from_env()
+            self.bb_client = BrowserbaseClient(self.bb_config)
+            await wait_for_context_settle()
+            self.bb_session = await asyncio.to_thread(self.bb_client.create_session, True, self.bb_purpose,
+                                                    self.bb_timeout_s)
+            try:
+                self.browser = await self._pw.chromium.connect_over_cdp(self.bb_session["connectUrl"])
+            except Exception:
+                await asyncio.to_thread(self.bb_client.release, self.bb_session["id"])
+                raise
+            # The default context carries the Browserbase fingerprint, proxy and persisted Context.
+            self.context = self.browser.contexts[0] if self.browser.contexts else await self.browser.new_context()
+            for p in self.context.pages:
+                self._track_solver(p)
+        elif self.mode == "cdp":
             if not cdp_up() and self.auto_start:
                 env = dict(os.environ)
                 if not self.headed:
@@ -72,7 +126,7 @@ class BrowserSession:
                 args=["--disable-blink-features=AutomationControlled", "--lang=en-US"],
                 locale="en-US", timezone_id="America/New_York", viewport={"width": 1440, "height": 900},
                 user_agent=UA)
-        if self.mode != "cdp":
+        if self.mode == "launch":
             # Only for our own Playwright-launched Chrome. The CDP Chrome is started without automation
             # flags, so navigator.webdriver is already false and patching it would be a detectable tell.
             await self.context.add_init_script(STEALTH_JS)
@@ -91,7 +145,9 @@ class BrowserSession:
 
     async def new_page(self) -> Page:
         page = await self.context.new_page()
-        if self.mode == "cdp":
+        if self.mode == "browserbase":
+            self._track_solver(page)
+        elif self.mode == "cdp":
             # The shared Chrome keeps its own UA/locale; emulate NY timezone + en-US per page via CDP.
             try:
                 s = await self.context.new_cdp_session(page)
@@ -120,6 +176,11 @@ class BrowserSession:
     async def new_isolated_page(self) -> Page:
         """Page in a fresh cookie-less context (guest). Used to retry when the shared context's
         bot-manager cookies (e.g. Akamai _abck) have been flagged."""
+        if self.mode == "browserbase":
+            # Extra contexts in a Browserbase browser don't get the session's fingerprint/proxy setup
+            # reliably, so retry in the main context with the bot-manager cookies already dropped.
+            page = await self.new_page()
+            return page
         if self.mode == "cdp":
             ctx = await self.browser.new_context(no_viewport=True)
         else:
@@ -142,12 +203,52 @@ class BrowserSession:
             except Exception:
                 pass
         try:
-            if self.mode != "cdp" and self.context:
+            if self.mode == "launch" and self.context:
                 await self.context.close()
+            elif self.mode == "browserbase" and self.browser:
+                await self.browser.close()
             # In CDP mode never close the shared browser; just disconnect.
+        except Exception:
+            pass
         finally:
+            if self.mode == "browserbase" and self.bb_session and self.bb_client:
+                try:
+                    await asyncio.to_thread(self.bb_client.release, self.bb_session["id"])
+                except Exception as e:
+                    print(f"[browserbase] release failed for {self.bb_session['id']}: {e}")
             if self._pw:
                 await self._pw.stop()
+
+    async def wait_for_captcha(self, page: Page, seconds: int | None = None) -> bool:
+        """After a challenge is detected, give Browserbase's solver time to clear it.
+
+        Returns True once the page no longer looks blocked. Gives up early if the solver never
+        engages (unsupported challenge), or at the deadline."""
+        limit = seconds if seconds is not None else (self.bb_config.captcha_wait_s if self.bb_config else 45)
+        grace = min(10, limit)
+        t0 = asyncio.get_event_loop().time()
+        engaged = False
+        while (elapsed := asyncio.get_event_loop().time() - t0) < limit:
+            await asyncio.sleep(1)
+            state = self._solver.get(id(page))
+            if state == "started":
+                engaged = True
+                continue
+            if not await detect_block(page):
+                return True
+            if not engaged and state is None and elapsed >= grace:
+                return False
+        return False
+
+    async def add_cookies(self, cookies: list[dict]) -> int:
+        ok = 0
+        for c in cookies:  # one by one so one bad cookie doesn't sink the batch
+            try:
+                await self.context.add_cookies([c])
+                ok += 1
+            except Exception:
+                pass
+        return ok
 
 
 # ---------- page helpers ----------

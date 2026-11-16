@@ -3,18 +3,20 @@ from __future__ import annotations
 import asyncio
 import os
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException, Depends, status, Query
+from fastapi import Body, FastAPI, HTTPException, Depends, status, Query
 from fastapi.responses import PlainTextResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from .models import (
-    LookupRequest, LookupResponse, LookupStatus, SiteInfo, SessionsResponse
+    LookupRequest, LookupResponse, LookupStatus, LoginRequest, SiteInfo, SessionsResponse
 )
 from .queue import JobQueue
 from .database import Database
 from ..browser import check_cdp_connection
+from ..browserbase import provider as browser_provider
+from ..sites import ADAPTERS
 
 security = HTTPBearer(auto_error=False)
 
@@ -62,10 +64,14 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health():
         """Health check endpoint."""
-        cdp_reachable = await check_cdp_connection()
+        if browser_provider() == "browserbase":
+            cdp = "browserbase"
+        else:
+            cdp = "reachable" if await check_cdp_connection() else "unreachable"
         return {
             "status": "healthy",
-            "cdp_connection": "reachable" if cdp_reachable else "unreachable",
+            "browser_provider": browser_provider(),
+            "cdp_connection": cdp,
             "queue_size": app.state.queue.queue_size(),
             "active_jobs": app.state.queue.active_count()
         }
@@ -166,8 +172,65 @@ def create_app() -> FastAPI:
         """Check login/block status for all sites."""
         sessions = await app.state.queue.check_sessions()
         return SessionsResponse(sessions=sessions)
-    
+
+    @app.get("/browser")
+    async def browser_info(_: None = Depends(verify_token)):
+        """Browser provider and effective (non-secret) Browserbase settings."""
+        return app.state.queue.browser_info()
+
+    @app.post("/browser/login")
+    async def start_login(req: LoginRequest = LoginRequest(), _: None = Depends(verify_token)):
+        """Open a Browserbase session on the persistent Context and return its live-view URL.
+
+        Sign in to the sites in that window, then call POST /browser/login/finish to save the cookies.
+        Lookups wait while a login session is open."""
+        from .queue import BrowserBusy
+        urls = req.urls or [ADAPTERS[s].home_url for s in (req.sites or []) if s in ADAPTERS and ADAPTERS[s].home_url]
+        try:
+            login = await app.state.queue.start_login(urls, minutes=req.minutes)
+        except BrowserBusy as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        except RuntimeError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {k: v for k, v in login.items() if not k.startswith("_")}
+
+    @app.post("/browser/login/finish")
+    async def finish_login(_: None = Depends(verify_token)):
+        """Release the login session; Browserbase saves its cookies to the Context."""
+        session_id = await app.state.queue.finish_login()
+        if not session_id:
+            raise HTTPException(status_code=404, detail="No login session is open")
+        return {"released": session_id}
+
+    @app.post("/browser/cookies")
+    async def import_cookies(payload: Any = Body(...), all_domains: bool = Query(False),
+                             _: None = Depends(verify_token)):
+        """Import cookies exported from a desktop browser (Cookie-Editor / EditThisCookie JSON, a
+        CDP cookie dump, or {"cookies": [...]}). By default only cookies for supported sites are kept."""
+        from ..cookies import _from_json
+        try:
+            cookies = _from_json(payload)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Unrecognised cookie JSON: {e}")
+        if not all_domains:
+            allowed = site_cookie_domains()
+            cookies = [c for c in cookies if cookie_domain_allowed(c["domain"], allowed)]
+        if not cookies:
+            raise HTTPException(status_code=400, detail="No usable cookies for supported sites")
+        imported = await app.state.queue.import_cookies(cookies)
+        return {"received": len(cookies), "imported": imported}
+
     return app
+
+
+def site_cookie_domains() -> set[str]:
+    from ..sites import ADAPTERS
+    return {d.lower() for a in ADAPTERS.values() for d in a.domains}
+
+
+def cookie_domain_allowed(domain: str, allowed: set[str]) -> bool:
+    d = domain.lower().lstrip(".")
+    return any(d == a or d.endswith("." + a) for a in allowed)
 
 
 app = create_app()

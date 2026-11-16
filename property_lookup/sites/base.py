@@ -44,6 +44,10 @@ class SiteAdapter:
     async def open(self, page: Page, url: str, ctx: RunCtx, settle: float = 2.5, wait: str = "domcontentloaded"):
         resp = await goto(page, url, settle=settle, wait=wait)
         reason = await detect_block(page)
+        sess = getattr(self, "sess", None)
+        if reason and sess is not None and sess.solves_captchas:
+            if await sess.wait_for_captcha(page):
+                reason = None
         if reason and ctx.interactive:
             if await wait_for_human(page, ctx.interactive):
                 reason = None
@@ -87,6 +91,8 @@ class SiteAdapter:
                 res.raw_text_snippet = txt[:1500] or None
             if res.status in (BLOCKED, LOGIN_REQUIRED) and not res.raw_text_snippet:
                 res.raw_text_snippet = (await body_text(page, 600)) or None
+            if sess.session_url and res.status != FOUND:
+                res.notes.append(f"browserbase replay: {sess.session_url}")
             res.elapsed_s = round(time.time() - t0, 1)
             try:
                 await page.close()

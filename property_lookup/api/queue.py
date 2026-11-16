@@ -4,14 +4,20 @@ import asyncio
 import datetime as dt
 import json
 import uuid
+from contextlib import asynccontextmanager
 from typing import Optional
 
 from .models import LookupStatus, LookupResponse, SiteProgress, SiteStatus, SessionInfo
 from .database import Database
 from ..address import parse_address, geocode
 from ..browser import BrowserSession
+from ..browserbase import provider as browser_provider
 from ..merge import write_report
 from ..sites import ADAPTERS
+
+
+class BrowserBusy(RuntimeError):
+    pass
 
 
 class JobQueue:
@@ -24,7 +30,31 @@ class JobQueue:
         self.active_job: Optional[str] = None
         self.worker_task: Optional[asyncio.Task] = None
         self.running = False
+        self.provider = browser_provider()
         self._browser_session: Optional[BrowserSession] = None
+        self._bb_config = None
+        # One Browserbase session at a time on the shared Context; parallel sessions would race
+        # to persist cookies and can get logins revoked.
+        self._browser_lock = asyncio.Lock()
+        self._login: Optional[dict] = None
+
+    @property
+    def bb_config(self):
+        if self._bb_config is None and self.provider == "browserbase":
+            from ..browserbase import BrowserbaseConfig
+            self._bb_config = BrowserbaseConfig.from_env()
+        return self._bb_config
+
+    def browser_info(self) -> dict:
+        info: dict = {"provider": self.provider}
+        if self.provider == "browserbase":
+            try:
+                info["browserbase"] = self.bb_config.summary()
+            except Exception as e:
+                info["error"] = str(e)
+            if self._login:
+                info["login_session"] = {k: self._login[k] for k in ("session_id", "live_view_url", "expires_at")}
+        return info
     
     async def start(self):
         """Start the worker task."""
@@ -42,6 +72,8 @@ class JobQueue:
                 await self.worker_task
             except asyncio.CancelledError:
                 pass
+        if self._login:
+            await self.finish_login()
         if self._browser_session:
             await self._browser_session.__aexit__(None, None, None)
     
@@ -102,9 +134,9 @@ class JobQueue:
         """Check login/block status for all sites."""
         from ..sessions import check_sessions as do_check_sessions
         
-        browser = await self._get_browser()
         site_names = list(ADAPTERS.keys())
-        rows = await do_check_sessions(browser, site_names)
+        async with self._browser("sessions") as browser:
+            rows = await do_check_sessions(browser, site_names)
         
         return [
             SessionInfo(
@@ -127,6 +159,78 @@ class JobQueue:
             )
             await self._browser_session.__aenter__()
         return self._browser_session
+
+    @asynccontextmanager
+    async def _browser(self, purpose: str = "lookup", wait: bool = True):
+        """Shared local Chrome, or a fresh Browserbase session released (and its Context saved) on exit."""
+        if self.provider != "browserbase":
+            yield await self._get_browser()
+            return
+        if not wait and self._browser_lock.locked():
+            raise BrowserBusy("browser is busy (a lookup or login session is running)")
+        async with self._browser_lock:
+            async with BrowserSession(mode="browserbase", bb_config=self.bb_config, bb_purpose=purpose) as s:
+                yield s
+
+    async def import_cookies(self, cookies: list[dict]) -> int:
+        """Add cookies to the browser profile (persisted to the Browserbase Context on release)."""
+        async with self._browser("cookie-import") as browser:
+            return await browser.add_cookies(cookies)
+
+    async def start_login(self, urls: list[str], minutes: int = 15) -> dict:
+        """Open a Browserbase session on the shared Context and return its live-view URL so a person can
+        sign in to sites. Lookups wait until finish_login() releases it (or it times out)."""
+        if self.provider != "browserbase":
+            raise RuntimeError("login sessions need BROWSER_PROVIDER=browserbase")
+        if self._login:
+            return self._login
+        try:
+            await asyncio.wait_for(self._browser_lock.acquire(), timeout=5)
+        except asyncio.TimeoutError:
+            raise BrowserBusy("a lookup is running; try again when the queue is idle")
+        try:
+            sess = BrowserSession(mode="browserbase", bb_config=self.bb_config, bb_purpose="login",
+                                  bb_timeout_s=minutes * 60 + 120)
+            await sess.__aenter__()
+            for url in urls:
+                page = await sess.new_page()
+                try:
+                    await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                except Exception:
+                    pass
+            live = await asyncio.to_thread(sess.bb_client.live_urls, sess.bb_session["id"])
+        except Exception:
+            self._browser_lock.release()
+            raise
+        expires = dt.datetime.utcnow() + dt.timedelta(minutes=minutes)
+        self._login = {
+            "session_id": sess.bb_session["id"],
+            "live_view_url": live.get("debuggerFullscreenUrl"),
+            "pages": [{"url": p.get("url"), "live_view_url": p.get("debuggerFullscreenUrl")}
+                      for p in live.get("pages", [])],
+            "replay_url": sess.session_url,
+            "expires_at": expires.isoformat() + "Z",
+            "_sess": sess,
+            "_timer": asyncio.create_task(self._login_timeout(minutes * 60)),
+        }
+        return self._login
+
+    async def _login_timeout(self, seconds: int):
+        await asyncio.sleep(seconds)
+        await self.finish_login(_from_timer=True)
+
+    async def finish_login(self, _from_timer: bool = False) -> Optional[str]:
+        """Release the login session so Browserbase saves its cookies to the Context."""
+        login, self._login = self._login, None
+        if not login:
+            return None
+        if not _from_timer:
+            login["_timer"].cancel()
+        try:
+            await login["_sess"].__aexit__(None, None, None)
+        finally:
+            self._browser_lock.release()
+        return login["session_id"]
     
     async def _worker(self):
         """Worker that processes jobs one at a time."""
@@ -192,8 +296,10 @@ class JobQueue:
             progress=json.dumps([p.model_dump() for p in progress])
         )
         
-        browser = await self._get_browser()
-        
+        async with self._browser("lookup") as browser:
+            await self._run_sites(job_id, addr, site_names, progress, browser)
+
+    async def _run_sites(self, job_id, addr, site_names, progress, browser):
         from ..sites.base import RunCtx
         from pathlib import Path
         import tempfile

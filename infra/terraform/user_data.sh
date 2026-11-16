@@ -106,6 +106,12 @@ API_TOKEN=${api_token}
 %{ if proxy != null && proxy != "" ~}
 PROXY=${proxy}
 %{ endif ~}
+%{ if browserbase_api_key != null && browserbase_api_key != "" ~}
+BROWSERBASE_API_KEY=${browserbase_api_key}
+%{ endif ~}
+%{ if browserbase_project_id != null && browserbase_project_id != "" ~}
+BROWSERBASE_PROJECT_ID=${browserbase_project_id}
+%{ endif ~}
 CACHE_TTL_HOURS=${cache_ttl_hours}
 CDP_PORT=9223
 ENVEOF

@@ -27,6 +27,7 @@ python -m property_lookup --check-sessions      # per site: reachable / blocked,
 | `--out DIR` | output root (default `output/`) |
 | `--check-sessions` | open each site and report cookie count, blocked state, logged-in vs guest |
 | `--debug` | verbose logging |
+| `--browserbase` | run in a Browserbase cloud browser (see `BROWSERBASE.md`) |
 
 ## Cookies / sessions
 Primary path: the persistent Chrome profile `~/.property-lookup/chrome-profile` behind CDP port 9223.
@@ -60,8 +61,14 @@ descriptions, links, screenshots. Values are never invented; missing = blank.
 
 Skipped on purpose: CityFeet, Auction.com.
 
+## Browserbase (hosted browser)
+With `BROWSERBASE_API_KEY` set (or `--browserbase`), lookups run in Browserbase cloud browsers with the
+Verified browser, CT residential proxies, CAPTCHA solving and a persistent cookie Context instead of the
+local Chrome. Logins go through a live-view session (`POST /browser/login`) or cookie import
+(`POST /browser/cookies`). See `BROWSERBASE.md`.
+
 ## What the tool does NOT do
-It does not solve captchas, press-and-hold or other bot challenges. A challenged site is reported
-`blocked` with a hint; rerun with `--interactive 120` and solve it on the box desktop, or rely on
-synced cookies. Discovery uses city-level search pages, so a listing that the site files under a
+With the local Chrome it does not solve captchas, press-and-hold or other bot challenges. A challenged
+site is reported `blocked` with a hint; rerun with `--interactive 120` and solve it on the box desktop,
+or rely on synced cookies. In Browserbase mode, Browserbase's solver handles supported challenges. Discovery uses city-level search pages, so a listing that the site files under a
 portfolio name with no street number (e.g. "Noble Ave Portfolio") can be missed.

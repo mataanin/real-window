@@ -123,6 +123,19 @@ variable "proxy" {
   default     = null
 }
 
+variable "browserbase_api_key" {
+  description = "Browserbase API key; when set the app runs lookups in Browserbase cloud browsers instead of local Chrome"
+  type        = string
+  sensitive   = true
+  default     = null
+}
+
+variable "browserbase_project_id" {
+  description = "Browserbase project ID (optional; inferred from the API key when omitted)"
+  type        = string
+  default     = null
+}
+
 variable "cache_ttl_hours" {
   description = "Cache TTL in hours"
   type        = number

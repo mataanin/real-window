@@ -157,6 +157,8 @@ locals {
     github_token_ssm_parameter = var.github_token_ssm_parameter
     api_token                  = var.api_token
     proxy                      = var.proxy
+    browserbase_api_key        = var.browserbase_api_key
+    browserbase_project_id     = var.browserbase_project_id
     cache_ttl_hours            = var.cache_ttl_hours
   })
 }

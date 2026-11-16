@@ -25,6 +25,8 @@ def build_parser():
     p.add_argument("--headless", dest="headed", action="store_false", help="headless Chrome (more blocks)")
     p.add_argument("--launch", action="store_true",
                    help="fallback: launch a private Playwright Chrome instead of attaching to the shared CDP Chrome on :9223")
+    p.add_argument("--browserbase", action="store_true",
+                   help="run in a Browserbase cloud browser (needs BROWSERBASE_API_KEY; see BROWSERBASE.md)")
     p.add_argument("--cookie-files", action="store_true",
                    help="also inject cookie files from cookies/<domain>.json|.txt (see COOKIES.md)")
     p.add_argument("--cookie-dir", type=Path, default=ROOT / "cookies")
@@ -44,7 +46,10 @@ async def run(args) -> int:
     if bad:
         print(f"unknown site(s): {bad}; known: {list(ADAPTERS)}", file=sys.stderr)
         return 2
-    async with BrowserSession(mode="launch" if args.launch else "cdp", headed=args.headed,
+    from .browserbase import provider
+    mode = "browserbase" if (args.browserbase or (provider() == "browserbase" and not args.launch)) \
+        else ("launch" if args.launch else "cdp")
+    async with BrowserSession(mode=mode, headed=args.headed,
                               cookie_files=args.cookie_files, cookie_dir=args.cookie_dir) as sess:
         if args.check_sessions:
             from .sessions import check_sessions

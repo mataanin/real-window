@@ -5,6 +5,15 @@ CDP_PORT="${CDP_PORT:-9223}"
 STATE_DIR="${STATE_DIR:-/app/.property-lookup}"
 mkdir -p "$STATE_DIR"
 
+PROVIDER="${BROWSER_PROVIDER:-}"
+if [[ -z "$PROVIDER" ]]; then
+    if [[ -n "${BROWSERBASE_API_KEY:-}" ]]; then PROVIDER=browserbase; else PROVIDER=local; fi
+fi
+if [[ "$PROVIDER" == "browserbase" ]]; then
+    echo "Browser provider: Browserbase (no local Chrome/Xvfb)"
+    exec python -m uvicorn property_lookup.api.app:app --host 0.0.0.0 --port 8000
+fi
+
 if [[ "${PL_HEADLESS:-0}" != "1" ]]; then
     PL_DISPLAY="${PL_DISPLAY:-:99}"
     DISPLAY_NUM="${PL_DISPLAY#:}"

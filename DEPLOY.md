@@ -17,6 +17,9 @@ The deployment stack consists of:
 - Optional Tailscale for secure remote access
 - Optional agentcookie sink for syncing cookies from your Mac
 - Optional residential proxy for bypassing datacenter IP blocks
+- Optional Browserbase cloud browsers instead of the local Chrome: set `BROWSERBASE_API_KEY` in `.env`
+  (see [BROWSERBASE.md](BROWSERBASE.md)). The container then skips Xvfb/Chrome, and logins happen
+  through a Browserbase live view instead of agentcookie.
 
 ## Auto-Deployment from GitHub Actions
 

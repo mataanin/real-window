@@ -12,6 +12,13 @@ class LookupRequest(BaseModel):
     force_refresh: bool = Field(False, description="Force refresh ignoring cache")
 
 
+class LoginRequest(BaseModel):
+    """Open a Browserbase live-view session for signing in to sites."""
+    sites: Optional[list[str]] = Field(None, description="Open these sites' home pages (adapter names)")
+    urls: Optional[list[str]] = Field(None, description="Open these URLs instead of site home pages")
+    minutes: int = Field(15, ge=1, le=120, description="Release the session automatically after this long")
+
+
 class LookupStatus(str, Enum):
     """Status of a lookup job."""
     QUEUED = "queued"
